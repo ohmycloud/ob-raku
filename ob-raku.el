@@ -3,9 +3,9 @@
 ;; Copyright (C) Tim Van den Langenbergh
 
 ;; Author: Tim Van den Langenbergh <tmt_vdl@gmx.com>
-;; Keywords: literate programming, reproducible research, Raku
+;; Keywords: literate programming, reproducible research
 ;; Homepage: https://github.com/tmtvl/ob-raku
-;; Version: 0.01
+;; Version: 0.02
 
 ;;; License:
 
@@ -86,7 +86,7 @@
   (mapcar
    (lambda (pair)
      (format
-      "%s%s=%s;"
+      "my %s%s = %s;"
       (if (listp (cdr pair))
 	  "@"
 	"$")
