@@ -6,6 +6,9 @@
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: https://github.com/tmtvl/ob-raku
 ;; Version: 0.03
+;; News: 0.03 --- Removed the double execution, simplified the formatting of the Raku output, fixed hline support.
+;;       0.02 --- Added support for tables, removed unneeded require statements, error when trying to use a session.
+;;       0.01 --- Initial release. Accept inputs, support for output and value results.
 
 ;;; License:
 
