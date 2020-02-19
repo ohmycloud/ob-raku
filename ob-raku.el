@@ -5,7 +5,7 @@
 ;; Author: Tim Van den Langenbergh <tmt_vdl@gmx.com>
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: https://github.com/tmtvl/ob-raku
-;; Version: 0.02
+;; Version: 0.03
 
 ;;; License:
 
@@ -34,130 +34,156 @@
 ;; (Optionally) requires Perl6 mode to be installed.
 
 ;;; Code:
-(require 'comint)
+
 (require 'ob)
-(require 'ob-comint)
 (require 'ob-eval)
 (require 'ob-ref)
-(eval-when-compile (require 'cl))
 
-;; define a file extension for this language
 (add-to-list 'org-babel-tangle-lang-exts '("raku" . "raku"))
 
 (defvar org-babel-default-header-args:raku '())
 
-(defvar org-babel-raku-command "raku" "Name of the Raku executable command.")
+(defvar org-babel-raku-command "raku"
+  "Command to run Raku.")
+
+(defun org-babel-expand-body:raku (body params &optional processed-params)
+  "Expand BODY according to the header arguments specified in PARAMS.
+Use the PROCESSED-PARAMS if defined."
+  (let ((vars
+	 (delq nil
+	       (mapcar
+		(lambda (pair)
+		  (when (eq (car pair) :var) (cdr pair)))
+		(or processed-params (org-babel-process-params params))))))
+    (concat
+     (mapconcat
+      (lambda (pair)
+	(format
+	 "my %s%s = %s;"
+	 (if (listp (cdr pair))
+	     "@"
+	   "$")
+	 (car pair)
+	 (org-babel-raku-var-to-raku (cdr pair))))
+      vars
+      "\n")
+     "\n" body "\n")))
 
 (defun org-babel-execute:raku (body params)
-  "Evaluate the BODY through Raku passing through the PARAMS."
+  "Execute the BODY of Raku code processing it according to PARAMS."
   (let* ((processed-params (org-babel-process-params params))
-	 (session (org-babel-raku-initiate-session (cdr (assoc :session params))))
+	 (session (cdr (assoc :session params)))
 	 (result-type (cdr (assoc :result-type params)))
-	 (full-body (org-babel-expand-body:generic
-		     body params (org-babel-variable-assignments:raku params))))
+	 (result-params (cdr (assoc :result-params params)))
+	 (full-body (org-babel-expand-body:raku body params processed-params)))
+    (org-babel-raku-evaluate full-body session result-type)
     (org-babel-reassemble-table
-     (org-babel-raku-evaluate session full-body result-type)
+     (org-babel-raku-evaluate full-body session result-type)
      (org-babel-pick-name
       (cdr (assoc :colname-names params)) (cdr (assoc :colnames params)))
      (org-babel-pick-name
       (cdr (assoc :rowname-names params)) (cdr (assoc :rownames params))))))
 
 (defun org-babel-prep-session:raku (session params)
-  "Prepare SESSION according to the header arguments in PARAMS."
-  (let* ((session (org-babel-raku-initiate-session session))
-	 (var-lines (org-babel-variable-assignments:raku params)))
-    (org-babel-comint-in-buffer session
-      (mapc (lambda (var)
-	      (end-of-line 1) (insert var) (comint-send-input)
-	      (org-babel-comint-wait-for-output session)) var-lines))
-    session))
-
-(defun org-babel-load-session:raku (session body params)
-  "Load BODY into SESSION with PARAMS."
-  (save-window-excursion
-    (let ((buffer (org-babel-prep-session:raku session params)))
-      (with-current-buffer buffer
-	(goto-char (process-mark (get-buffer-process (current-buffer))))
-	(insert (org-babel-chomp body)))
-      buffer)))
-
-(defun org-babel-variable-assignments:raku (params)
-  "Return list of Raku statements assigning the block's variables with PARAMS."
-  (mapcar
-   (lambda (pair)
-     (format
-      "my %s%s = %s;"
-      (if (listp (cdr pair))
-	  "@"
-	"$")
-      (car pair)
-      (org-babel-raku-var-to-raku (cdr pair))))
-   (mapcar
-    #'cdr
-    (delq nil
-	  (mapcar
-	   (lambda (p) (when (eq (car p) :var) p))
-	   params)))))
+  "Prepare SESSION according to the header arguments specified in PARAMS."
+  (error "Sessions are not supported for Raku"))
 
 (defun org-babel-raku-var-to-raku (var)
-  "Convert an elisp value to a Raku variable.
-The elisp value, VAR, is converted to a string of Raku source code
-specifying a var of the same value."
+  "Convert an elisp value VAR to a Raku definition of the same value."
   (if (listp var)
-      (concat "(" (mapconcat #'org-babel-raku-var-to-raku var ", ") ")")
-    (format "%s" var)))
+      (concat
+       "("
+       (mapconcat
+	'org-babel-raku-var-to-raku
+	var
+	", ")
+       ")")
+    (format "%S" var)))
+
+(defun org-babel-raku-sanitize-table (table)
+  "Recursively sanitize the values in the given TABLE."
+  (if (listp table)
+      (mapcar 'org-babel-raku-sanitize-table table)
+    (if (string= table "Any")
+	'hline
+      (org-babel-script-escape table))))
+
+(defun org-babel-raku-table-or-string (results)
+  "If RESULTS look like a table, then convert them into an elisp table.
+Otherwise return RESULTS as a string."
+  (if (char-equal (string-to-char results) ?\()
+      (let ((sublists (split-string results "[()]" t)))
+	(org-babel-raku-sanitize-table
+	 (mapcar
+	  (lambda (str)
+	    (split-string str ", " t))
+	  sublists)))
+    (org-babel-script-escape results)))
 
 (defun org-babel-raku-initiate-session (&optional session)
-  "Return SESSION with a current inferior-process-buffer.
-Initializes SESSION if it hasn't already."
+  "If there is not a current inferior-process-buffer in SESSION then create.
+Return the initialized SESSION."
   (unless (string= session "none")
-    (let* ((session (or session "*raku*"))
-	   (buffer (get-buffer-create session)))
-      (unless (comint-check-proc buffer)
-	(make-comint-in-buffer session buffer org-babel-raku-command))
-      buffer)))
+    (if session (error "Sessions are not supported for Raku"))))
 
-(defvar org-babel-raku-eoe-indicator "'org_babel_raku_eoe'"
-  "A string to indicate that evaluation has completed.")
+(defun org-babel-raku-evaluate (body &optional session result-type)
+  "Evaluate the BODY with Raku.
+If SESSION is not provided, evaluate in an external process.
+If RESULT-TYPE is not provided, assume \"value\"."
+  (org-babel-raku-table-or-string (if (and session (not (string= session "none")))
+      (org-babel-raku-evaluate-session session body result-type)
+    (org-babel-raku-evaluate-external body result-type))))
 
-(defvar org-babel-raku-wrapper "sub _MAIN () {
+(defconst org-babel-raku-wrapper
+  "sub _MAIN {
 %s
 }
-\"%s\".IO.spurt(_MAIN().perl ~ \"\n\");"
-  "Wrapper for simply showing the output of the Raku code.")
 
-(defun org-babel-raku-evaluate (session body &optional result-type)
-  "Evaluate BODY as Raku code.
-If a SESSION isn't available it will be evaluated externally."
-  (if session
-      (org-babel-raku-evaluate-session session body result-type)
-    (org-babel-raku-evaluate-external body result-type)))
+sub _FORMATTER ($result) {
+my $output;
+
+given $result.WHAT {
+when Array | List {
+my @elems;
+
+for @$result -> $e {
+push @elems, _FORMATTER($e);
+}
+
+$output = \"({ join \", \", @elems })\";
+}
+when Hash {
+$output = \"({ join \", \", map { \"(\" ~ $^a ~ \", \" ~ $^b ~ \")\" }, $result.kv})\";
+}
+default {
+$output = $result.raku;
+}
+}
+
+$output
+}
+
+\"%s\".IO.spurt(\"{ _FORMATTER(_MAIN()) }\\n\");"
+  "Wrapper for grabbing the final value from Raku code.")
 
 (defun org-babel-raku-evaluate-external (body &optional result-type)
-  "Evaluate Raku BODY in external process.
-If RESULT-TYPE equals 'output then return standard output as a string.
-If RESULT-TYPE equals 'value then return the value of the last
-statement in BODY, as elisp."
-  (case result-type
-    (output
-     (message "Output")
-     (org-babel-eval org-babel-raku-command body))
-    (value
-     (message "Value")
-     (let ((tmp-file (org-babel-temp-file "raku-")))
-		 (org-babel-eval
-		  org-babel-raku-command
-		  (format org-babel-raku-wrapper body
-			  (org-babel-process-file-name tmp-file 'noquote)))
-		 (org-babel-eval-read-file tmp-file)))))
+  "Evaluate the BODY with an external Raku process.
+If RESULT-TYPE is not provided, assume \"value\"."
+  (if (and result-type (string= result-type "output"))
+      (org-babel-eval org-babel-raku-command body)
+    (let ((temp-file (org-babel-temp-file "raku-" ".raku")))
+      (org-babel-eval
+       org-babel-raku-command
+       (format
+	org-babel-raku-wrapper
+	body
+	(org-babel-process-file-name temp-file 'noquote)))
+      (org-babel-eval-read-file temp-file))))
 
 (defun org-babel-raku-evaluate-session (session body &optional result-type)
-  "Pass BODY to the Raku process in SESSION.
-If RESULT-TYPE equals 'output then return standard output as a string.
-If RESULT-TYPE equals 'value then return the value of the last
-statement in BODY, as elisp."
-  ;; TODO: Support value returns.
-  (error "Not yet implemented"))
+  "Evaluate the BODY with the Raku process running in SESSION.
+If RESULT-TYPE is not provided, assume \"value\"."
+  (error "Sessions are not supported for Raku"))
 
 (provide 'ob-raku)
 ;;; ob-raku.el ends here
