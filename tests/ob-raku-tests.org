@@ -1,0 +1,55 @@
+* Tests for ob-raku
+
+** Basic Raku source block
+
+   #+NAME: basic-test
+   #+BEGIN_SRC raku
+my $a = 6;
+my $b = 7;
+$a * $b;
+   #+END_SRC
+
+** Raku source block with output
+
+   #+NAME: output-test
+   #+HEADER: :results output
+   #+BEGIN_SRC raku
+say 6;
+say 7;
+6 * 7;
+   #+END_SRC
+
+** Raku source block returning a list
+   
+   #+NAME: list-test
+   #+BEGIN_SRC raku
+my @a = (("Name", "Age", "Weight"), "HLINE", ("Fido", 4, 6));
+   #+END_SRC
+
+** Raku source block returning a hash
+
+   #+NAME: hash-test
+   #+BEGIN_SRC raku
+my %a = (a => 1, b => 2);
+   #+END_SRC
+
+** Raku source block with parameters
+
+   #+NAME: parameterised-test
+   #+HEADER: :var n=7
+   #+BEGIN_SRC raku
+[+] ^$n;
+   #+END_SRC
+
+** Test interaction with other blocks
+
+   #+NAME: f
+   #+BEGIN_SRC elisp :results vector
+'(1 2 3)
+   #+END_SRC
+
+   #+NAME: interaction-test
+   #+HEADER: :var f=f()
+   #+BEGIN_SRC raku
+my @a = map { $_ ** 2 }, @f;
+   #+END_SRC
