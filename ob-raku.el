@@ -76,7 +76,6 @@ Use the PROCESSED-PARAMS if defined."
 	 (result-type (cdr (assoc :result-type params)))
 	 (result-params (cdr (assoc :result-params params)))
 	 (full-body (org-babel-expand-body:raku body params processed-params)))
-    (org-babel-raku-evaluate full-body session result-type)
     (org-babel-reassemble-table
      (org-babel-raku-evaluate full-body session result-type)
      (org-babel-pick-name
@@ -94,31 +93,47 @@ Use the PROCESSED-PARAMS if defined."
       (concat
        "("
        (mapconcat
-	'org-babel-raku-var-to-raku
+	#'org-babel-raku-var-to-raku
 	var
 	", ")
        ")")
-    (format "%S" var)))
+    (if (equal var 'hline)
+	"\"HLINE\""
+      (format "%S" var))))
 
 (defun org-babel-raku-sanitize-table (table)
   "Recursively sanitize the values in the given TABLE."
   (if (listp table)
-      (mapcar 'org-babel-raku-sanitize-table table)
-    (if (string= table "Any")
-	'hline
-      (org-babel-script-escape table))))
+      (let ((sanitized-table (mapcar 'org-babel-raku-sanitize-table table)))
+	(if (and (stringp (car sanitized-table))
+		 (string= (car sanitized-table) "HLINE"))
+	    'hline
+	  sanitized-table))
+    (org-babel-script-escape table)))
 
 (defun org-babel-raku-table-or-string (results)
   "If RESULTS look like a table, then convert them into an elisp table.
 Otherwise return RESULTS as a string."
-  (if (char-equal (string-to-char results) ?\()
-      (let ((sublists (split-string results "[()]" t)))
-	(org-babel-raku-sanitize-table
-	 (mapcar
-	  (lambda (str)
-	    (split-string str ", " t))
-	  sublists)))
-    (org-babel-script-escape results)))
+  (cond
+   ((string-prefix-p "$[" results)
+    (org-babel-raku-sanitize-table
+     (mapcar
+      (lambda (pairstring)
+	(split-string pairstring ", " t))
+      (split-string
+       (substring results 2 -2)
+       "[()]"
+       t))))
+   ((string-prefix-p "{" results)
+    (org-babel-raku-sanitize-table
+     (mapcar
+      (lambda (pairstring)
+	(split-string pairstring " => " t))
+      (split-string
+       (substring results 1 -2)
+       ", "
+       t))))
+   (t (org-babel-script-escape results))))
 
 (defun org-babel-raku-initiate-session (&optional session)
   "If there is not a current inferior-process-buffer in SESSION then create.
@@ -140,27 +155,8 @@ If RESULT-TYPE is not provided, assume \"value\"."
 }
 
 sub _FORMATTER ($result) {
-my $output;
-
-given $result.WHAT {
-when Array | List {
-my @elems;
-
-for @$result -> $e {
-push @elems, _FORMATTER($e);
-}
-
-$output = \"({ join \", \", @elems })\";
-}
-when Hash {
-$output = \"({ join \", \", map { \"(\" ~ $^a ~ \", \" ~ $^b ~ \")\" }, $result.kv})\";
-}
-default {
-$output = $result.raku;
-}
-}
-
-$output
+return $result.gist if $result.WHAT ~~ Hash;
+$result.raku
 }
 
 \"%s\".IO.spurt(\"{ _FORMATTER(_MAIN()) }\\n\");"
